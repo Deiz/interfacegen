@@ -212,9 +212,21 @@ func (app *application) parse(lpkgs []*packages.Package) {
 		log.Fatal(err)
 	}
 
-	formatted, err := format([]byte(code))
-	if err != nil {
-		log.Fatal(err)
+	var formatted []byte
+
+	// Continue formatting the output until it stabilizes, as goimports
+	// can't currently remove duplicate unused imports in one shot.
+	for {
+		formatted, err = format([]byte(code))
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		if string(formatted) == code {
+			break
+		}
+
+		code = string(formatted)
 	}
 
 	switch app.Output {
