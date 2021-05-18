@@ -5,15 +5,21 @@ import (
 	"context"
 	"fmt"
 	"go/ast"
+	"go/token"
 	"go/types"
 	"log"
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/tools/go/packages"
 	"golang.org/x/tools/go/types/typeutil"
 	"golang.org/x/tools/imports"
+)
+
+var (
+	skip = regexp.MustCompile(`//\s*interfacegen:skip`)
 )
 
 func main() {
@@ -82,7 +88,7 @@ type application struct {
 func (app *application) Run(ctx context.Context) error {
 	// Load, parse, and type-check the packages named on the command line.
 	mode := (packages.NeedName | packages.NeedFiles | packages.NeedImports |
-		packages.NeedTypes | packages.NeedTypesSizes | packages.NeedSyntax)
+		packages.NeedTypes | packages.NeedTypesSizes | packages.NeedSyntax | packages.NeedTypesInfo | packages.NeedModule)
 
 	cfg := &packages.Config{
 		Mode:       mode,
@@ -95,21 +101,16 @@ func (app *application) Run(ctx context.Context) error {
 		return err
 	}
 
-	app.parse(lpkgs)
-	return nil
+	return app.parse(lpkgs)
 }
 
-func (app *application) parse(lpkgs []*packages.Package) {
+func (app *application) parse(lpkgs []*packages.Package) error {
 	imports := map[string]bool{}
 
 	var interfaceDefs []interfaceDef
 
 	for _, lpkg := range lpkgs {
-		var comments map[string][]string
-
-		if app.IncludeDocs {
-			comments = populateDocs(lpkg)
-		}
+		comments := populateDocs(lpkg)
 
 		var target *types.Package
 
@@ -167,10 +168,19 @@ func (app *application) parse(lpkgs []*packages.Package) {
 					types.WriteSignature(b, sig, qualifier)
 
 					slug := strings.Join([]string{lpkg.ID, obj.Name(), meth.Obj().Name()}, ".")
+					if shouldSkip(comments[slug]) {
+						continue
+					}
+
+					doc := comments[slug]
+					if !app.IncludeDocs {
+						doc = nil
+					}
+
 					methods = append(methods, methodDef{
 						Method: meth.Obj().Name() + b.String(),
 						Slug:   slug,
-						Doc:    comments[slug],
+						Doc:    doc,
 					})
 				}
 
@@ -178,8 +188,19 @@ func (app *application) parse(lpkgs []*packages.Package) {
 					continue
 				}
 
+				slug := strings.Join([]string{lpkg.ID, name}, ".")
+				if shouldSkip(comments[slug]) {
+					continue
+				}
+
+				doc := comments[slug]
+				if !app.IncludeDocs {
+					doc = nil
+				}
+
 				interfaceDefs = append(interfaceDefs, interfaceDef{
 					Name:    name,
+					Doc:     doc,
 					Methods: methods,
 				})
 			}
@@ -199,7 +220,7 @@ func (app *application) parse(lpkgs []*packages.Package) {
 	}
 
 	if len(interfaceDefs) == 0 {
-		log.Fatalf("package %s contained no matching interfaces", app.SrcPackage)
+		return fmt.Errorf("package %s contained no matching interfaces", app.SrcPackage)
 	}
 
 	var distinctImports []string
@@ -209,7 +230,7 @@ func (app *application) parse(lpkgs []*packages.Package) {
 
 	code, err := app.generatePackage(distinctImports, interfaceDefs)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 
 	var formatted []byte
@@ -219,7 +240,7 @@ func (app *application) parse(lpkgs []*packages.Package) {
 	for {
 		formatted, err = format([]byte(code))
 		if err != nil {
-			log.Fatal(err)
+			return err
 		}
 
 		if string(formatted) == code {
@@ -233,11 +254,10 @@ func (app *application) parse(lpkgs []*packages.Package) {
 	case "", "-":
 		fmt.Println(string(formatted))
 	default:
-		err = app.writeFile(formatted)
-		if err != nil {
-			log.Fatal(err)
-		}
+		return app.writeFile(formatted)
 	}
+
+	return nil
 }
 
 func (app *application) writeFile(data []byte) (err error) {
@@ -270,35 +290,71 @@ func populateDocs(p *packages.Package) map[string][]string {
 
 	for _, f := range p.Syntax {
 		for _, decl := range f.Decls {
-			fd, ok := decl.(*ast.FuncDecl)
-			if !ok || fd.Recv == nil || fd.Doc == nil {
-				continue
+			switch v := decl.(type) {
+			case *ast.FuncDecl:
+				if v.Recv == nil || v.Doc == nil {
+					continue
+				}
+
+				se, ok := v.Recv.List[0].Type.(*ast.StarExpr)
+				if !ok {
+					continue
+				}
+
+				ident, ok := se.X.(*ast.Ident)
+				if !ok {
+					continue
+				}
+
+				var docs []string
+
+				for _, d := range v.Doc.List {
+					docs = append(docs, d.Text)
+				}
+
+				if len(docs) == 0 {
+					continue
+				}
+
+				slug := strings.Join([]string{p.ID, ident.Name, v.Name.String()}, ".")
+				ret[slug] = docs
+			case *ast.GenDecl:
+				if v.Tok != token.TYPE {
+					continue
+				}
+
+				spec := v.Specs[0].(*ast.TypeSpec)
+
+				var docs []string
+
+				if v.Doc == nil {
+					continue
+				}
+
+				for _, d := range v.Doc.List {
+					docs = append(docs, d.Text)
+				}
+
+				if len(docs) == 0 {
+					continue
+				}
+
+				slug := strings.Join([]string{p.ID, spec.Name.String()}, ".")
+				ret[slug] = docs
 			}
-
-			se, ok := fd.Recv.List[0].Type.(*ast.StarExpr)
-			if !ok {
-				continue
-			}
-
-			ident, ok := se.X.(*ast.Ident)
-			if !ok {
-				continue
-			}
-
-			var docs []string
-
-			for _, d := range fd.Doc.List {
-				docs = append(docs, d.Text)
-			}
-
-			if len(docs) == 0 {
-				continue
-			}
-
-			slug := strings.Join([]string{p.ID, ident.Name, fd.Name.String()}, ".")
-			ret[slug] = docs
 		}
 	}
 
 	return ret
+}
+
+func shouldSkip(comments []string) bool {
+	for _, comment := range comments {
+		m := skip.MatchString(comment)
+		if m {
+			return true
+		}
+	}
+
+	return false
 }

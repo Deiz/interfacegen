@@ -18,7 +18,9 @@ type interfaceDef struct {
 }
 
 const packageTemplate = `
-// {{.Comment}}
+{{ if .Comment -}}
+// {{ .Comment -}}
+{{- end }}
 
 package {{.PackageName}}
 
@@ -31,7 +33,9 @@ import (
 {{ end -}}
 
 {{ range $_, $interface := .Interfaces }}
-// {{ $interface.Name }} ...
+{{- range $_, $doc := $interface.Doc }}
+{{ $doc }}
+{{- end }}
 type {{ $interface.Name }} interface {
 {{- range $_, $method := $interface.Methods }}
 {{- range $_, $doc := $method.Doc }}

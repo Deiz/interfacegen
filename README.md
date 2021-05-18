@@ -12,6 +12,7 @@ Its feature set is as follows:
 - Supports copying comments from the source implementation into interfaces
 - Supports unique names for generated interfaces via `-t concreteName,interfaceName`
 - Correctly imports types defined in the source package
+- Supports `//interfacegen:skip` comments at the type and method level to selectively exclude items
 
 ## Installation
 
