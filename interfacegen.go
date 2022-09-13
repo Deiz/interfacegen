@@ -10,6 +10,7 @@ import (
 	"log"
 	"os"
 	"regexp"
+	"runtime/debug"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -27,8 +28,9 @@ func main() {
 	app := application{}
 
 	cmd := &cobra.Command{
-		Use:   "interfacegen",
-		Short: "interfacegen generates interfaces from concrete types",
+		Use:     "interfacegen",
+		Short:   "interfacegen generates interfaces from concrete types",
+		Version: buildVersionString(),
 		Run: func(cmd *cobra.Command, args []string) {
 			for _, t := range types {
 				components := strings.Split(t, ",")
@@ -357,4 +359,38 @@ func shouldSkip(comments []string) bool {
 	}
 
 	return false
+}
+
+func buildVersionString() string {
+	var s string
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "\nunknown"
+	}
+
+	if info.Main.Path != "" {
+		s += "\nmodule: " + info.Main.Path
+	}
+
+	if info.GoVersion != "" {
+		s += "\ncompiler: " + info.GoVersion
+	}
+
+	if info.Main.Version != "" {
+		s += "\nsemver: " + info.Main.Version
+	}
+
+	for _, buildSetting := range info.Settings {
+		if buildSetting.Value == "" {
+			continue
+		}
+		switch buildSetting.Key {
+		case "vcs.revision":
+			s += "\nvcs.revision: " + buildSetting.Value
+		case "vcs.time":
+			s += "\nvcs.revision.time: " + buildSetting.Value
+		}
+	}
+
+	return s
 }
