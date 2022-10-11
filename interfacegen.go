@@ -9,6 +9,7 @@ import (
 	"go/types"
 	"log"
 	"os"
+	"path/filepath"
 	"regexp"
 	"runtime/debug"
 	"strings"
@@ -263,6 +264,11 @@ func (app *application) parse(lpkgs []*packages.Package) error {
 }
 
 func (app *application) writeFile(data []byte) (err error) {
+	err = os.MkdirAll(filepath.Dir(app.Output), 0755)
+	if err != nil {
+		return err
+	}
+
 	w, err := os.OpenFile(app.Output, os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		return err
