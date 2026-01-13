@@ -97,10 +97,15 @@ import (
 	r9 "github.com/redis/go-redis/v9"
 
 	"golang.org/x/tools/imports"
+
+	_ "embed"
 )
 
 func main() {
 }
+
+//go:embed response_codes.json
+var responseCodes []byte
 
 type FooClient struct {
 	v8 *r8.Client

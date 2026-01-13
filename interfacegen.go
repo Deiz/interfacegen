@@ -129,6 +129,10 @@ func (app *application) parse(lpkgs []*packages.Package) error {
 					name = importSpec.Name.Name
 				}
 
+				if name == "_" {
+					continue
+				}
+
 				importDefs[importDef{
 					Path: strings.Trim(importSpec.Path.Value, `"`),
 					Name: name,
